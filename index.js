@@ -6,30 +6,16 @@ import { v4 as getUuid } from 'uuid';
  * @returns {string} Epilog code corresponding to `program`.
  */
 export function programToEpilog(program, context = []) {
-  let code = "";
-
-  // code += Object.entries(program.declarations).map(([kind, dict]) => {
-  //   if (kind === 'Situation') return '';
-  //   if (dict.class === 'class') return '';
-  //   return Object.entries(dict.properties).map(([name, decl]) => {
-  //     return objectToEpilog(name, decl, kind);
-  //   });
-  // })
-  // .filter(code => !!code)
-  // .join('\n\n');
-
-  //code += program.chains.map(chainToEpilog).join('\n\n');
-
-  code += '% Chains\n\n';
-
-  code += Object.entries(program.chains).map(([name, chain]) => {
-    return chainToEpilog(name, chain);
-  }).join('\n\n');
-
-  code += '\n\n% Declarations\n\n';
+  let code = '% Declarations\n\n';
 
   code += Object.entries(program.declarations).map(([name, decl]) => {
     return declarationToEpilog(name, decl);
+  }).join('\n\n');
+
+  code += '\n\n% Chains\n\n';
+
+  code += Object.entries(program.chains).map(([name, chain]) => {
+    return chainToEpilog(name, chain);
   }).join('\n\n');
 
   return code;
@@ -67,29 +53,31 @@ function declarationToEpilog(name, declaration) {
     });
     return code;
   }
+
+  throw new Error(`Unrecognized declaration "${name}": ${JSON.stringify(declaration)}`);
 }
 
-function orToEpilog(orOp) {
-  const situationSymbol = `situation_${getUuid()}`;
-  let code = '';
-  const operandSymbols = [];
+function chainToEpilog(name, chain) {
+  const chainSymbol = `chain_${name}`;
+  let code = `chain(${chainSymbol})\n`;
 
-  // Stringify situations
-  orOp.children.forEach((situation, i) => {
+  const chainMatch = ['rule',
+                      ['matches_chain', chainSymbol, 'Situation']];
+
+  chain.children.forEach(situation => {
     const [sitCode, sitSymbol] = situationToEpilog(situation);
     code += sitCode + '\n';
-    if (sitSymbol) operandSymbols.push(sitSymbol);
+    chainMatch.push(['situation', 'Situation']);
+    chainMatch.push(['matches_situation', sitSymbol, 'Situation']);
   });
 
-  // Stringify disjunctions
-  code += operandSymbols.map(operand => {
-    return epilog.grind(['rule',
-                         ['matches_situation', situationSymbol, 'Situation'],
-                         ['situation', 'Situation'],
-                         ['matches_situation', operand, 'Situation']]);
+  code += epilog.grind(chainMatch);
+
+  code += (chain.annotations || []).forEach(annotation => {
+    return annotationToEpilog(annotation, chainSymbol);
   }).join('\n');
 
-  return [code, situationSymbol];
+  return code;
 }
 
 function situationToEpilog(situation, chain) {
@@ -162,6 +150,73 @@ function expressionToEpilog(expression) {
   return [code, sitSymbol];
 }
 
+function causalToEpilog(causal) {
+  const situationSymbol = `situation_${getUuid()}`;
+  let code = '';
+  const operandSymbols = [];
+
+  // Stringify situations
+  causal.children.forEach((situation, i) => {
+    const [sitCode, sitSymbol] = situationToEpilog(situation);
+    code += sitCode + '\n';
+    operandSymbols.push(sitSymbol);
+  });
+
+  const matchRule = ['rule',
+                     ['matches_situation', situationSymbol, 'Situation'],
+                     ['matches_situation', operandSymbols[operandSymbols.length - 1], 'Situation']];
+
+  let currentVar = `Situation`;
+
+  // Stringify causal relationships
+  // i > 0 skips the last operand on purpose; we aren't interested in first causes
+  for (let i = causal.children.length - 1; i > 0; i--) {
+    const situation = causal.children[i];
+
+    // skip wildcards, they're only relevant in terms of their neighbours
+    if (situation.type === 'any') continue;
+
+    const direct = causal.children[i - 1]?.type !== 'any';
+    const previousVar = currentVar;
+    currentVar = `Situation_${getUuid()}`;
+
+    if (direct) {
+      matchRule.push(['matches_situation', operandSymbols[i - 1], currentVar]);
+      matchRule.push(['direct_cause', currentVar, previousVar]);
+    } else {
+      matchRule.push(['matches_situation', operandSymbols[i - 2], currentVar]);
+      matchRule.push(['indirect_cause', currentVar, previousVar]);
+    }
+  }
+
+  code += epilog.grind(matchRule);
+
+  return [code, situationSymbol];
+}
+
+function orToEpilog(orOp) {
+  const situationSymbol = `situation_${getUuid()}`;
+  let code = '';
+  const operandSymbols = [];
+
+  // Stringify situations
+  orOp.children.forEach((situation, i) => {
+    const [sitCode, sitSymbol] = situationToEpilog(situation);
+    code += sitCode + '\n';
+    if (sitSymbol) operandSymbols.push(sitSymbol);
+  });
+
+  // Stringify disjunctions
+  code += operandSymbols.map(operand => {
+    return epilog.grind(['rule',
+                         ['matches_situation', situationSymbol, 'Situation'],
+                         ['situation', 'Situation'],
+                         ['matches_situation', operand, 'Situation']]);
+  }).join('\n');
+
+  return [code, situationSymbol];
+}
+
 function ruleCallToEpilog(ruleCall) {
   const situationSymbol = `situation_${getUuid()}`;
   let code = '';
@@ -173,25 +228,6 @@ function ruleCallToEpilog(ruleCall) {
                         ['matches_chain', `chain_${ruleCall.name}`, 'Situation']]);
 
   return [code, situationSymbol];
-}
-
-function chainToEpilog(name, chain) {
-  const chainSymbol = `chain_${name}`;
-  let code = `chain(${chainSymbol})\n`;
-
-  const chainMatch = ['rule',
-                      ['matches_chain', chainSymbol, 'Situation']];
-
-  chain.children.forEach(situation => {
-    const [sitCode, sitSymbol] = situationToEpilog(situation);
-    code += sitCode + '\n';
-    chainMatch.push(['situation', 'Situation']);
-    chainMatch.push(['matches_situation', sitSymbol, 'Situation']);
-  });
-
-  code += epilog.grind(chainMatch);
-
-  return code;
 }
 
 function ipdlToEpilog(ipdl) {
@@ -247,52 +283,8 @@ function annotationToEpilog(annotation, context) {
       val = JSON.stringify(rawVal.value);
     }
 
-    code += epilog.grind(['prop', annotationSymbol, `${key}`, val]) + '\n';
+    code += epilog.grind(['prop', annotationSymbol, `"${key}"`, val]) + '\n';
   });
 
   return code;
-}
-
-function causalToEpilog(causal) {
-  const situationSymbol = `situation_${getUuid()}`;
-  let code = '';
-  const operandSymbols = [];
-
-  // Stringify situations
-  causal.children.forEach((situation, i) => {
-    const [sitCode, sitSymbol] = situationToEpilog(situation);
-    code += sitCode + '\n';
-    operandSymbols.push(sitSymbol);
-  });
-
-  const matchRule = ['rule',
-                     ['matches_situation', situationSymbol, 'Situation'],
-                     ['matches_situation', operandSymbols[operandSymbols.length - 1], 'Situation']];
-
-  let currentVar = `Situation`;
-
-  // Stringify causal relationships
-  // i > 0 skips the last operand on purpose; we aren't interested in first causes
-  for (let i = causal.children.length - 1; i > 0; i--) {
-    const situation = causal.children[i];
-
-    // skip wildcards, they're only relevant in terms of their neighbours
-    if (situation.type === 'any') continue;
-
-    const direct = causal.children[i - 1]?.type !== 'any';
-    const previousVar = currentVar;
-    currentVar = `Situation_${getUuid()}`;
-
-    if (direct) {
-      matchRule.push(['matches_situation', operandSymbols[i - 1], currentVar]);
-      matchRule.push(['direct_cause', currentVar, previousVar]);
-    } else {
-      matchRule.push(['matches_situation', operandSymbols[i - 2], currentVar]);
-      matchRule.push(['indirect_cause', currentVar, previousVar]);
-    }
-  }
-
-  code += epilog.grind(matchRule);
-
-  return [code, situationSymbol];
 }
