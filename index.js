@@ -73,9 +73,13 @@ function chainToEpilog(name, chain) {
 
   code += epilog.grind(chainMatch);
 
-  code += (chain.annotations || []).forEach(annotation => {
+  const annotationsCode = (chain.annotations || []).map(annotation => {
     return annotationToEpilog(annotation, chainSymbol);
   }).join('\n');
+
+  if (annotationsCode) {
+    code += '\n' + annotationsCode;
+  }
 
   return code;
 }
@@ -252,39 +256,22 @@ function objectToEpilog(name, obj, kind) {
   return [code, symbol];
 }
 
-function getSymbol(ast, context) {
-  if (ast.type === 'annotation') {
-    if (!context.length) throw new Error(`Orphan annotation: ${ast.name}`);
-    return `${getSymbol(context[context.length])}_annotation_${ast.name}`;
-  } else if (ast.type === 'block') {
-    const chainAncestor = findAncestor(a => a.type === 'Chain');
-    if (chainAncestor) {
-      
-    }
-  } else if (ast.type === 'Chain') {
-    return `chain_${ast.name}`;
-  }
+function annotationToEpilog(annotation, target) {
+  if (!target) throw new Error(`Orphan annotation "${annotation.name}" on ${target}`);
 
-  return context.name;
-}
+  const annotationSymbol = `${target}_annotation_${annotation.name}`;
 
-function annotationToEpilog(annotation, context) {
-  if (!context.length) throw new Error(`Orphan annotation: ${annotation.name}`);
+  let code = epilog.grind(['annotation', target, `"${annotation.name}"`, annotationSymbol]) + '\n';
 
-  const targetSymbol = getSymbol(context[context.length]);
-  const annotationSymbol = getSymbol(annotation, context);
-
-  let code = epilog.grind(['annotation', targetSymbol, `${annotation.name}`, annotationSymbol]) + '\n';
-
-  Object.entries(annotation.properties).forEach(([key, rawVal]) => {
+  code += Object.entries(annotation.properties).map(([key, rawVal]) => {
     let val = rawVal.value;
     // TODO variables
     if (rawVal.type === 'string') {
       val = JSON.stringify(rawVal.value);
     }
 
-    code += epilog.grind(['prop', annotationSymbol, `"${key}"`, val]) + '\n';
-  });
+    return epilog.grind(['prop', annotationSymbol, `"${key}"`, val]);
+  }).join('\n');
 
   return code;
 }
