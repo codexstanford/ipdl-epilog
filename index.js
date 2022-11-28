@@ -19,26 +19,6 @@ export function programToEpilog(program, context = []) {
   }).join('\n\n');
 
   return code;
-
-  // const [code, _] = ast.reduce(([code, context], node) => {
-  //   if (node.type === 'annotation') {
-  //     return [code + annotationToEpilog(node, context) + '\n', context];
-  //   } else if (node.type === 'Chain') {
-  //     context.push(node);
-  //     const contentCode = ipdlToEpilog(node.content, context);
-  //     context.pop();
-  //     return [[code + chainToEpilog(context, node) + contentCode].join('\n'), context];
-  //   } else if (node.type === 'operation') {
-  //     context.push(node);
-  //     const operandsCode = ipdlToEpilog(node.operands, context);
-  //     context.pop();
-  //     return [[code + operandsCode + operationToEpilog(node, context)].join('\n'), context];
-  //   }
-
-  //   return [code, context];
-  // }, ['', context]);
-
-  // return code;
 }
 
 function declarationToEpilog(name, declaration) {
